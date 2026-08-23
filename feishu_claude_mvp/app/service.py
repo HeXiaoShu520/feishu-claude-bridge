@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +40,7 @@ class ReplySnapshot:
     steps: tuple[str, ...] = ()
     session_id: str | None = None
     permission: dict[str, Any] | None = None
+    request_id: str = ""
 
 
 class ReplyStream(Protocol):
@@ -151,6 +151,9 @@ class ConversationController:
 
     async def _run(self, prompt: str, generation: int) -> None:
         """运行一轮 Claude 请求并将文本和状态渐进渲染到飞书。"""
+        import logging
+        log = logging.getLogger(__name__)
+        log.info("Claude 输入前100字符：%s", prompt[:100])
         agent = self._get_agent()
         parts: list[str] = []
         changed = asyncio.Event()
@@ -189,6 +192,7 @@ class ConversationController:
         final_state = "已完成"
         try:
             result = await agent.run(prompt, output, permission, status)
+            log.info("Claude 输出前100字符：%s", "".join(parts)[:100])
             metrics = result.metrics
             session_id = result.session_id
             if generation != self._generation:
@@ -214,16 +218,25 @@ class ConversationController:
                 logging.getLogger(__name__).exception("飞书回复卡片更新失败：状态=%s", final_state)
 
     async def _update_reply(self, reply_handle: Any, parts: list[str], changed: asyncio.Event, finished: asyncio.Event, generation: int, snapshot: Callable[[], ReplySnapshot]) -> None:
-        """将完整增量内容交给飞书原生流式卡片渲染。"""
+        """按顺序更新卡片，并在首段文字到达前显示思考动画。"""
         last_sent = ""
         first_update = True
+        animation_index = 0
         while generation == self._generation and not finished.is_set():
-            await changed.wait()
-            changed.clear()
+            try:
+                await asyncio.wait_for(changed.wait(), timeout=0.8)
+                changed.clear()
+            except asyncio.TimeoutError:
+                current = snapshot()
+                if current.state != "思考中" or current.text:
+                    continue
+                animation_index = (animation_index + 1) % 4
+                current = ReplySnapshot("思考中" + "." * animation_index, current.state, current.detail, current.metrics, current.final, current.steps, current.session_id)
+            else:
+                current = snapshot()
             if not first_update:
                 await asyncio.sleep(0.07)
             first_update = False
-            current = snapshot()
             key = f"{current.state}\0{current.detail}\0{current.text}"
             if key != last_sent and not finished.is_set():
                 try:

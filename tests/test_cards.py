@@ -26,7 +26,7 @@ def test_final_reply_card_contains_metrics() -> None:
 
     assert card["header"]["template"] == "green"
     assert "claude-test" in metrics_text
-    assert "输入 12 / 输出 34" not in metrics_text
+    assert "输入 12 / 输出 34" in metrics_text
     assert "1.2s" in metrics_text
 
 

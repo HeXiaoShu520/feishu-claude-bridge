@@ -77,7 +77,7 @@ async def run() -> None:
         async def ask(tool_name: str, tool_input: dict) -> str:
             async def send_card(approval_id: str, token: str, name: str, data: dict) -> str:
                 return await bot.send_card(message.chat_id, bot.build_permission_card(approval_id, token, name, data))
-            return await permissions.request(message.chat_id, message.user_open_id, send_card, tool_name, tool_input)
+            return await permissions.request(message.chat_id, message.user_open_id, send_card, tool_name, tool_input, bot.update_permission_message)
         return ask
 
     service = BotService(store, cwd, send_factory, FeishuReplyStream, permission_factory, ClaudeAgent)

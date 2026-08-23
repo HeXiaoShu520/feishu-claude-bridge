@@ -13,7 +13,15 @@ def permission_card(approval_id: str, token: str, tool_name: str, tool_input: di
     """构造脱敏后的工具授权卡片。"""
     summary = json.dumps(_redact(tool_input), ensure_ascii=False, sort_keys=True)[:800]
     actions = [{"tag": "button", "text": {"tag": "plain_text", "content": text}, "type": style, "value": {"approval_id": approval_id, "token": token, "decision": decision}} for text, decision, style in [("允许一次", "allow_once", "primary"), ("本会话允许", "allow_session", "default"), ("拒绝", "deny", "danger")]]
-    return {"config": {"wide_screen_mode": True}, "header": {"title": {"tag": "plain_text", "content": "Claude 请求工具授权"}, "template": "orange"}, "elements": [{"tag": "markdown", "content": f"**工具：** `{tool_name}`\n\n```json\n{summary}\n```"}, {"tag": "action", "actions": actions}]}
+    return {"config": {"wide_screen_mode": True}, "header": {"title": {"tag": "plain_text", "content": "Claude 请求工具授权"}, "template": "orange"}, "elements": [{"tag": "markdown", "content": f"**工具：** `{tool_name}`\\n\\n```json\\n{summary}\\n```"}, {"tag": "action", "actions": actions}]}
+
+
+def permission_result_card(tool_name: str, tool_input: dict[str, Any], decision: str) -> dict[str, Any]:
+    """构造显示授权结果且不再包含操作按钮的卡片。"""
+    summary = json.dumps(_redact(tool_input), ensure_ascii=False, sort_keys=True)[:800]
+    result_text = {"allow_once": "✅ 已授权一次", "allow_session": "✅ 本会话已授权", "deny": "❌ 已拒绝"}.get(decision, "⏱ 授权已超时")
+    template = "green" if decision in {"allow_once", "allow_session"} else "red"
+    return {"config": {"wide_screen_mode": True}, "header": {"title": {"tag": "plain_text", "content": f"Claude {result_text}"}, "template": template}, "elements": [{"tag": "markdown", "content": f"**工具：** `{tool_name}`\n\n```json\n{summary}\n```\n\n{result_text}"}]}
 
 
 def streaming_card(snapshot: Any) -> dict[str, Any]:
@@ -63,9 +71,7 @@ def _metrics_text(metrics: Any, session_id: str | None = None) -> str:
     cache_read, cache_written = getattr(metrics, "cache_read_tokens", None), getattr(metrics, "cache_creation_tokens", None)
     cache_text = "" if cache_read is None and cache_written is None else f" · 缓存 {cache_read or 0}/{cache_written or 0}"
     short_id = f" · {session_id[-8:]}" if session_id else ""
-    context_percentage = getattr(metrics, "context_percentage", None)
-    context_text = f" · 上下文 {context_percentage:.1f}%" if context_percentage is not None else ""
-    return f"{model}{short_id}{context_text} · {getattr(metrics, 'elapsed_seconds', 0.0):.1f}s"
+    return f"{model} · 输入 {input_tokens or 0} / 输出 {output_tokens or 0}{cache_text} · {getattr(metrics, 'elapsed_seconds', 0.0):.1f}s{short_id}"
 
 
 def compact_markdown(text: str) -> str:

@@ -22,13 +22,15 @@ class PermissionBroker:
         self.timeout = timeout
         self.pending: dict[str, PendingPermission] = {}
 
-    async def request(self, chat_id: str, user_open_id: str, send_card, tool_name: str, tool_input: dict[str, Any]) -> str:
+    async def request(self, chat_id: str, user_open_id: str, send_card, tool_name: str, tool_input: dict[str, Any], update_card=None) -> str:
         approval_id, token = str(uuid.uuid4()), secrets.token_urlsafe(24)
         future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
         self.pending[approval_id] = PendingPermission(chat_id, user_open_id, token, future)
         message_id = await send_card(approval_id, token, tool_name, tool_input)
         try:
             decision = await asyncio.wait_for(future, self.timeout)
+            if message_id and update_card:
+                await update_card(message_id, tool_name, tool_input, decision)
             return decision
         except asyncio.TimeoutError:
             return "deny"

@@ -106,7 +106,7 @@ npm test -- -q
 - `FEISHU_CLAUDE_CWD` 必须是受控目录；不要让聊天用户指定本机路径。
 - 默认使用 `default` 权限模式；普通用户不可切到 `bypassPermissions`。
 - 独立授权卡片只接受发起该 Claude 会话的用户点击，工具参数中的敏感字段会脱敏。
-- 日志不会输出 App Secret、token、ticket、access_key、password、cookie 或 API key；飞书 SDK 的连接日志已关闭。
+- 日志不会输出 App Secret、token、ticket、access_key、password、cookie 或 API key；飞书 SDK 的连接日志已关闭。请求日志只记录用户输入和模型输出的前 100 个字符。
 - 不要把 `.env`、运行日志或截图提交到公开仓库；若凭证已经出现在日志中，应立即轮换。
 - 建议用权限受限的操作系统账户运行机器人。
 
