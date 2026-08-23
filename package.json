@@ -1,0 +1,12 @@
+{
+  "name": "cc-connect",
+  "version": "0.1.0",
+  "private": true,
+  "description": "npm scripts wrapper for the Python Feishu Claude service",
+  "scripts": {
+    "install": "node scripts/python-runner.mjs install",
+    "start": "node scripts/python-runner.mjs start",
+    "dev": "node scripts/python-runner.mjs start",
+    "test": "node scripts/python-runner.mjs test"
+  }
+}

@@ -1,0 +1,23 @@
+[project]
+name = "feishu-claude-mvp"
+version = "0.1.0"
+description = "Feishu-native Claude Code assistant"
+requires-python = ">=3.11"
+dependencies = [
+    "claude-agent-sdk>=0.2.137",
+    "lark-oapi>=1.6.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[project.scripts]
+feishu-claude-mvp = "feishu_claude_mvp.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
