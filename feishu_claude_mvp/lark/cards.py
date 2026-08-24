@@ -10,10 +10,20 @@ STATE_TEMPLATES = {"建立会话": "blue", "思考中": "blue", "正在回答": 
 
 
 def permission_card(approval_id: str, token: str, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
-    """构造脱敏后的工具授权卡片。"""
-    summary = json.dumps(_redact(tool_input), ensure_ascii=False, sort_keys=True)[:800]
+    """构造结构清晰、脱敏后的工具授权卡片。"""
+    redacted = _redact(tool_input)
+    command = str(redacted.get("command", "")).strip() if isinstance(redacted, dict) else ""
+    description = str(redacted.get("description", "")).strip() if isinstance(redacted, dict) else ""
+    details = []
+    if description:
+        details.append(f"**说明**：{description}")
+    if command:
+        details.append(f"**命令**：\n```bash\n{command[:1200]}\n```")
+    if not details:
+        details.append(f"```json\n{json.dumps(redacted, ensure_ascii=False, sort_keys=True, indent=2)[:1200]}\n```")
     actions = [{"tag": "button", "text": {"tag": "plain_text", "content": text}, "type": style, "value": {"approval_id": approval_id, "token": token, "decision": decision}} for text, decision, style in [("允许一次", "allow_once", "primary"), ("本会话允许", "allow_session", "default"), ("拒绝", "deny", "danger")]]
-    return {"config": {"wide_screen_mode": True}, "header": {"title": {"tag": "plain_text", "content": "Claude 请求工具授权"}, "template": "orange"}, "elements": [{"tag": "markdown", "content": f"**工具：** `{tool_name}`\\n\\n```json\\n{summary}\\n```"}, {"tag": "action", "actions": actions}]}
+    content = f"**工具**：`{tool_name}`\\n\\n" + "\\n\\n".join(details)
+    return {"config": {"wide_screen_mode": True}, "header": {"title": {"tag": "plain_text", "content": "Claude 请求工具授权"}, "template": "orange"}, "elements": [{"tag": "markdown", "content": content}, {"tag": "action", "actions": actions}]}
 
 
 def permission_result_card(tool_name: str, tool_input: dict[str, Any], decision: str) -> dict[str, Any]:
@@ -24,22 +34,25 @@ def permission_result_card(tool_name: str, tool_input: dict[str, Any], decision:
     return {"config": {"wide_screen_mode": True}, "header": {"title": {"tag": "plain_text", "content": f"Claude {result_text}"}, "template": template}, "elements": [{"tag": "markdown", "content": f"**工具：** `{tool_name}`\n\n```json\n{summary}\n```\n\n{result_text}"}]}
 
 
-def streaming_card(snapshot: Any) -> dict[str, Any]:
+def streaming_card(snapshot: Any, chat_id: str = "", user_open_id: str = "") -> dict[str, Any]:
     """渲染普通 interactive 消息每次 Patch 所需的完整流式卡片。"""
     elements = []
     if snapshot.text:
         elements.append({"tag": "markdown", "content": compact_markdown(snapshot.text)})
     title = "Claude"
-    card = {"schema": "2.0", "config": {"streaming_mode": not snapshot.final, "update_multi": True, "summary": {"content": "Claude 正在生成回复"}, "streaming_config": {"print_frequency_ms": {"default": 70, "android": 70, "ios": 70, "pc": 70}, "print_step": {"default": 1, "android": 1, "ios": 1, "pc": 1}, "print_strategy": "fast"}}, "header": {"title": {"tag": "plain_text", "content": title}, "template": STATE_TEMPLATES.get(snapshot.state, "blue")}}
+    card = {"config": {"wide_screen_mode": True}, "header": {"title": {"tag": "plain_text", "content": title}, "template": STATE_TEMPLATES.get(snapshot.state, "blue")}}
     if not elements:
         elements.append({"tag": "markdown", "content": stream_status(snapshot.state, getattr(snapshot, "detail", None), getattr(snapshot, "steps", ()))})
     if snapshot.permission:
         auth = permission_card(snapshot.permission["approval_id"], snapshot.permission["token"], snapshot.permission["tool_name"], snapshot.permission["tool_input"])
         elements.extend(auth["elements"])
     if snapshot.final and elements[0]["tag"] == "markdown":
-        metrics = stream_metrics(snapshot.metrics, snapshot.session_id)
-        elements[0]["content"] = f"{elements[0]['content']}\n\n<font color='grey'>{metrics}</font>"
-    card["body"] = {"elements": elements}
+        metrics = _context_metrics(snapshot.metrics, snapshot.session_id)
+        if chat_id and user_open_id:
+            elements.append({"tag": "column_set", "flex_mode": "none", "background_style": "default", "columns": [{"tag": "column", "width": "weighted", "vertical_align": "center", "elements": [{"tag": "markdown", "content": f"<font color='grey'>{metrics}</font>"}]}, *[{"tag": "column", "width": "auto", "vertical_align": "center", "elements": [{"tag": "button", "text": {"tag": "plain_text", "content": text}, "type": "default", "value": {"action": action, "chat_id": chat_id, "user_open_id": user_open_id}}]} for text, action in (("详情", "details"), ("压缩", "compact"), ("新建", "new"))]]})
+        else:
+            elements[0]["content"] = f"{elements[0]['content']}\n\n<font color='grey'>{metrics}</font>"
+    card["elements"] = elements
     return card
 
 
@@ -67,11 +80,32 @@ def _metrics_text(metrics: Any, session_id: str | None = None) -> str:
         return f"ID {session_id[-8:]}" if session_id else "Token：SDK 未提供"
     model = getattr(metrics, "model", None) or "SDK 未提供"
     input_tokens, output_tokens = getattr(metrics, "input_tokens", None), getattr(metrics, "output_tokens", None)
-    token_text = "Token：SDK 未提供" if input_tokens is None and output_tokens is None else f"输入 {input_tokens or 0} / 输出 {output_tokens or 0}"
+    token_text = "Token：SDK 未提供" if input_tokens is None and output_tokens is None else f"输入 {_format_k(input_tokens)} / 输出 {_format_k(output_tokens)}"
     cache_read, cache_written = getattr(metrics, "cache_read_tokens", None), getattr(metrics, "cache_creation_tokens", None)
-    cache_text = "" if cache_read is None and cache_written is None else f" · 缓存 {cache_read or 0}/{cache_written or 0}"
+    cache_text = "" if cache_read is None and cache_written is None else f" · 缓存 {_format_k(cache_read)}/{_format_k(cache_written)}"
     short_id = f" · {session_id[-8:]}" if session_id else ""
-    return f"{model} · 输入 {input_tokens or 0} / 输出 {output_tokens or 0}{cache_text} · {getattr(metrics, 'elapsed_seconds', 0.0):.1f}s{short_id}"
+    return f"{model} · {token_text}{cache_text} · {getattr(metrics, 'elapsed_seconds', 0.0):.1f}s{short_id}"
+
+
+def _context_metrics(metrics: Any, session_id: str | None = None) -> str:
+    """渲染当前请求上下文长度，不混淆上下文占用百分比。"""
+    if metrics is None:
+        return "上下文：SDK 未提供"
+    values = [getattr(metrics, name, None) for name in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens")]
+    if all(value is None for value in values):
+        return "上下文：SDK 未提供"
+    total = getattr(metrics, "context_tokens", None)
+    if total is None:
+        total = sum(value or 0 for value in values)
+    model = getattr(metrics, "model", None) or "SDK 未提供"
+    elapsed = getattr(metrics, "elapsed_seconds", 0.0)
+    short_id = f" · {session_id[-8:]}" if session_id else ""
+    return f"{model} · 上下文 {_format_k(total)} · {elapsed:.1f}s{short_id}"
+
+
+def _format_k(value: int | None) -> str:
+    """将 Token 数量转换为一位小数的 K 单位。"""
+    return "-" if value is None else f"{value / 1000:.1f}K"
 
 
 def compact_markdown(text: str) -> str:

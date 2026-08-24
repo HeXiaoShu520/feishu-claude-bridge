@@ -66,9 +66,10 @@ async def run() -> None:
     class FeishuReplyStream:
         def __init__(self, message: IncomingMessage) -> None:
             self.chat_id = message.chat_id
+            self.user_open_id = message.user_open_id
 
         async def start(self, snapshot: ReplySnapshot):
-            return await bot.create_streaming_reply(self.chat_id, snapshot)
+            return await bot.create_streaming_reply(self.chat_id, snapshot, self.user_open_id)
 
         async def update(self, handle, snapshot: ReplySnapshot) -> None:
             await bot.update_streaming_reply(handle, snapshot)
@@ -83,6 +84,11 @@ async def run() -> None:
     service = BotService(store, cwd, send_factory, FeishuReplyStream, permission_factory, ClaudeAgent)
 
     def on_card_action(value: dict[str, str], chat_id: str, user_open_id: str) -> bool:
+        if value.get("action") in {"new", "details", "compact"}:
+            if value.get("chat_id") != chat_id or value.get("user_open_id") != user_open_id:
+                return False
+            asyncio.create_task(service.handle_card_action(value["action"], chat_id, user_open_id))
+            return True
         return permissions.resolve(value.get("approval_id", ""), value.get("token", ""), value.get("decision", ""), chat_id, user_open_id)
 
     bot = FeishuBot(require("FEISHU_APP_ID"), require("FEISHU_APP_SECRET"), service.handle_message, on_card_action)

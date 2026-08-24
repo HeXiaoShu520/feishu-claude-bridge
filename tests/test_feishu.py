@@ -99,8 +99,8 @@ async def test_cardkit_streaming_reply_uses_entity_and_sequenced_element_updates
     assert handle.card_id == ""
     assert len(message_api.creates) == 1
     assert len(message_api.patches) == 2
-    assert json.loads(message_api.patches[0].request_body.content)["schema"] == "2.0"
-    assert json.loads(message_api.patches[1].request_body.content)["config"]["streaming_mode"] is False
+    assert "schema" not in json.loads(message_api.patches[0].request_body.content)
+    assert json.loads(message_api.patches[1].request_body.content)["config"]["wide_screen_mode"] is True
 
 
 @pytest.mark.asyncio

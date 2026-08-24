@@ -16,6 +16,16 @@ class NewCommand:
 
 
 @dataclass(frozen=True)
+class CompactCommand:
+    pass
+
+
+@dataclass(frozen=True)
+class ContextCommand:
+    pass
+
+
+@dataclass(frozen=True)
 class StopCommand:
     pass
 
@@ -40,7 +50,7 @@ class InvalidCommand:
     message: str
 
 
-Command = TextPrompt | NewCommand | StopCommand | HelpCommand | ResumeCommand | ModeCommand | InvalidCommand
+Command = TextPrompt | NewCommand | CompactCommand | ContextCommand | StopCommand | HelpCommand | ResumeCommand | ModeCommand | InvalidCommand
 
 
 def parse_command(text: str) -> Command:
@@ -50,6 +60,10 @@ def parse_command(text: str) -> Command:
 
     command, _, argument = text.partition(" ")
     argument = argument.strip()
+    if command == "/context":
+        return ContextCommand() if not argument else InvalidCommand("/context 不接受参数")
+    if command == "/compact":
+        return CompactCommand() if not argument else InvalidCommand("/compact 不接受参数")
     if command == "/new":
         return NewCommand() if not argument else InvalidCommand("/new 不接受参数")
     if command == "/stop":

@@ -26,7 +26,7 @@ def test_final_reply_card_contains_metrics() -> None:
 
     assert card["header"]["template"] == "green"
     assert "claude-test" in metrics_text
-    assert "输入 12 / 输出 34" in metrics_text
+    assert "输入 0.0K / 输出 0.0K" in metrics_text
     assert "1.2s" in metrics_text
 
 
@@ -34,8 +34,8 @@ def test_streaming_card_always_contains_body() -> None:
     """初始空内容帧也必须包含飞书要求的 body。"""
     card = streaming_card(ReplySnapshot("", "思考中", "准备请求…"))
 
-    assert card["body"]["elements"]
-    assert card["body"]["elements"][0]["content"] == "思考中"
+    assert card["elements"]
+    assert card["elements"][0]["content"] == "思考中"
 
 
 def test_streaming_card_renders_complete_interactive_frames() -> None:
@@ -43,14 +43,13 @@ def test_streaming_card_renders_complete_interactive_frames() -> None:
     running = streaming_card(ReplySnapshot("正在输出", "正在回答", "生成正文", steps=("准备请求…", "生成正文")))
     completed = streaming_card(ReplySnapshot("最终结果", "已完成", metrics=Metrics(), final=True, steps=("正在生成答复",), session_id="session-1"))
 
-    assert running["schema"] == "2.0"
-    assert running["config"]["streaming_mode"] is True
-    assert running["body"]["elements"] == [{"tag": "markdown", "content": "正在输出"}]
-    assert completed["config"]["streaming_mode"] is False
+    assert "schema" not in running
+    assert running["config"]["wide_screen_mode"] is True
+    assert running["elements"] == [{"tag": "markdown", "content": "正在输出"}]
+    assert completed["config"]["wide_screen_mode"] is True
     assert completed["header"]["template"] == "green"
-    assert [element["tag"] for element in completed["body"]["elements"]] == ["markdown"]
-    assert "claude-test" in completed["body"]["elements"][0]["content"]
-    assert "ession-1" in completed["body"]["elements"][0]["content"]
+    assert [element["tag"] for element in completed["elements"]] == ["markdown"]
+    assert "claude-test · 上下文 0.1K · 1.2s" in completed["elements"][0]["content"]
 
 
 def test_markdown_compacts_blank_lines_but_keeps_code() -> None:

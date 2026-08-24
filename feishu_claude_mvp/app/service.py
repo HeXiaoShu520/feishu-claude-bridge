@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from .commands import HelpCommand, InvalidCommand, ModeCommand, NewCommand, ResumeCommand, StopCommand, TextPrompt, parse_command
+from .commands import CompactCommand, ContextCommand, HelpCommand, InvalidCommand, ModeCommand, NewCommand, ResumeCommand, StopCommand, TextPrompt, parse_command
 from .store import Conversation, ConversationStore
 
 
@@ -24,6 +24,7 @@ class Agent(Protocol):
 
     def matches(self, cwd: Path, mode: str, session_id: str | None) -> bool: ...
     async def run(self, prompt: str, output, ask_permission, status=None) -> AgentResult: ...
+    async def compact(self) -> bool: ...
     async def interrupt(self) -> bool: ...
     async def close(self) -> None: ...
 
@@ -97,6 +98,17 @@ class ConversationController:
                 await self.send_text("已请求停止当前任务。")
             elif isinstance(command, HelpCommand):
                 await self.send_text(_help_text())
+            elif isinstance(command, ContextCommand):
+                if not self._agent:
+                    await self.send_text("当前没有可查看的 Claude 会话。")
+                else:
+                    details = await self._agent.context_details()
+                    await self.send_text(details or "当前 Claude 会话尚未连接，暂时无法读取上下文详情。")
+            elif isinstance(command, CompactCommand):
+                if not self._agent or not await self._agent.compact():
+                    await self.send_text("当前没有可压缩的 Claude 会话。")
+                else:
+                    await self.send_text("已压缩当前 Claude 会话上下文。")
             elif isinstance(command, NewCommand):
                 await self._stop()
                 self.store.clear_session(self.conversation.key)
@@ -163,8 +175,8 @@ class ConversationController:
         metrics: Any = None
         session_id: str | None = None
         steps: list[str] = [detail]
-        reply_handle = await self.reply_stream.start(ReplySnapshot("", state, detail, steps=tuple(steps)))
-        updater = asyncio.create_task(self._update_reply(reply_handle, parts, changed, finished, generation, lambda: ReplySnapshot("".join(parts), state, detail, metrics, False, tuple(steps))))
+        reply_handle = await self.reply_stream.start(ReplySnapshot("", state, detail, steps=tuple(steps), session_id=session_id))
+        updater = asyncio.create_task(self._update_reply(reply_handle, parts, changed, finished, generation, lambda: ReplySnapshot("".join(parts), state, detail, metrics, False, tuple(steps), session_id)))
 
         def output(text: str) -> None:
             if generation == self._generation:
@@ -276,6 +288,23 @@ class BotService:
         self.permission_factory = permission_factory
         self.agent_factory = agent_factory
         self.controllers: dict[str, ConversationController] = {}
+
+    async def handle_card_action(self, action: str, chat_id: str, user_open_id: str) -> bool:
+        """处理回复卡片上的会话操作按钮。"""
+        key = f"{chat_id}:{user_open_id}"
+        controller = self.controllers.get(key)
+        if not controller:
+            return False
+        if action == "new":
+            await controller.handle("/new")
+            return True
+        if action == "details":
+            await controller.handle("/context")
+            return True
+        if action == "compact":
+            await controller.handle("/compact")
+            return True
+        return False
 
     async def handle_message(self, message: IncomingMessage) -> None:
         """路由一条飞书消息到对应的会话控制器。"""

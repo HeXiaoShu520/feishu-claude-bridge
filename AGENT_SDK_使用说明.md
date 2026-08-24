@@ -159,7 +159,7 @@ await client.interrupt()
 ClaudeAgentOptions(include_partial_messages=True)
 ```
 
-在 `receive_response()` 中收到 `StreamEvent`，提取文本增量后更新飞书消息或卡片。
+在 `receive_response()` 中收到 `StreamEvent`，提取文本增量后更新飞书消息或卡片。飞书侧明确使用旧版 interactive `message.patch`，不使用 CardKit JSON 2.0（V2）、卡片实体或 V2 专用交互结构。
 
 ### 5. 工具权限卡片
 
@@ -200,14 +200,16 @@ Claude 请求工具
 | `default` | 默认，需确认的工具交给飞书卡片 |
 | `plan` | 只规划/分析，不执行工具 |
 | `acceptEdits` | 自动接受编辑操作 |
-| `dontAsk` | 未预授权就拒绝 |
-| `bypassPermissions` | 全跳过权限；不要给飞书普通用户 |
+| `dontAsk` | 不弹授权卡片；未预授权的工具直接拒绝 |
+| `bypassPermissions` | 全跳过权限并自动执行工具；不要给飞书普通用户 |
 
 飞书首版默认：
 
 ```python
 permission_mode="default"
 ```
+
+发送 `/mode dontAsk` 后不再弹授权卡片，但没有预授权的工具会直接被拒绝；如果需要完全自动执行工具，只能由受信任的管理员配置 `bypassPermissions`，不要向普通聊天用户开放。
 
 ---
 

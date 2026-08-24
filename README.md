@@ -9,7 +9,7 @@
 - Claude 会话按 `chat_id + user_open_id` 隔离并保存；
 - `/help`、`/new`、`/stop`、`/resume [session_id]`、`/mode default|acceptEdits|plan|dontAsk`；
 - Claude 工具请求以飞书卡片显示：允许一次 / 本会话允许 / 拒绝；
-- 使用飞书 CardKit JSON 2.0 原生流式卡片，通过卡片实体整卡更新展示 Claude 输出；
+- 使用旧版 interactive 卡片，通过 `message.patch` 更新展示 Claude 输出；明确不使用飞书 CardKit JSON 2.0（V2）；
 - 流式卡片使用颜色区分状态，终态正文末尾显示模型、上下文占用百分比、耗时和会话短 ID；上下文百分比来自 Claude Agent SDK 的 `get_context_usage()`；
 - Claude 工具授权使用独立卡片显示，授权完成后继续更新原流式回复卡片；
 - 同一 `chat_id + user_open_id` 复用 Claude client/子进程；服务重启或连接异常后通过保存的 session ID 恢复；
@@ -58,7 +58,7 @@ card.action.trigger
 - 删除已完成的工具授权消息；
 - 创建、更新和发送 CardKit 卡片实体。
 
-流式回复使用 CardKit 原生卡片实体和递增 `sequence` 更新，不再使用旧版 interactive `message.patch` 生产逻辑。每次 CardKit 请求使用唯一 UUID，避免重复请求被飞书拒绝。
+流式回复明确不使用 CardKit 原生卡片实体、JSON 2.0（V2）或递增 `sequence` 更新；生产逻辑使用旧版 interactive `message.patch`，按钮也不使用 V2 专用结构。
 
 终态指标示例：
 
@@ -104,7 +104,9 @@ npm test -- -q
 ## 安全
 
 - `FEISHU_CLAUDE_CWD` 必须是受控目录；不要让聊天用户指定本机路径。
-- 默认使用 `default` 权限模式；普通用户不可切到 `bypassPermissions`。
+- 默认使用 `default` 权限模式；需要确认的工具会弹出飞书授权卡片。
+- 可发送 `/mode dontAsk` 关闭授权卡片，但未预授权的工具会被拒绝；`acceptEdits` 只自动接受编辑类操作，其他工具仍可能需要确认。
+- 不建议对普通用户开放 `bypassPermissions`；它会跳过权限确认并自动执行工具。
 - 独立授权卡片只接受发起该 Claude 会话的用户点击，工具参数中的敏感字段会脱敏。
 - 日志不会输出 App Secret、token、ticket、access_key、password、cookie 或 API key；飞书 SDK 的连接日志已关闭。请求日志只记录用户输入和模型输出的前 100 个字符。
 - 不要把 `.env`、运行日志或截图提交到公开仓库；若凭证已经出现在日志中，应立即轮换。

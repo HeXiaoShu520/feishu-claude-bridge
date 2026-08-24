@@ -30,6 +30,7 @@ class RunMetrics:
     elapsed_seconds: float = 0.0
     tool_calls: int = 0
     context_percentage: float | None = None
+    context_tokens: int | None = None
 
 
 @dataclass
@@ -66,6 +67,38 @@ class ClaudeAgent:
             return await self._active_task
         finally:
             self._active_task = None
+
+    async def context_details(self) -> str | None:
+        """读取当前 Claude Code 会话的真实上下文占用。"""
+        if not self._client or not self._connected:
+            return None
+        try:
+            usage = await self._client.get_context_usage()
+        except Exception:
+            log.debug("无法读取 Claude 上下文详情", exc_info=True)
+            return None
+        percentage = float(usage.get("percentage", 0.0))
+        tokens = int(usage.get("totalTokens", 0))
+        window = usage.get("contextWindow") or usage.get("context_window")
+        window_text = f" / {int(window) / 1000:.1f}K" if window else ""
+        return f"会话 {self.session_id or '未知'}\n上下文：{tokens / 1000:.1f}K{window_text}（{percentage:.1f}%）\n模型：{self._model_name()}\n工作目录：{self.cwd}"
+
+    def _model_name(self) -> str:
+        """返回当前 SDK 客户端记录的模型名。"""
+        return getattr(self._client, "model", None) or "SDK 未提供"
+
+    async def compact(self) -> bool:
+        """向当前 Claude Code 会话发送上下文压缩指令。"""
+        if not self._client or not self._connected:
+            return False
+        try:
+            await self._client.query("/compact")
+            async for _ in self._client.receive_response():
+                pass
+            return True
+        except Exception:
+            await self.close()
+            raise
 
     async def interrupt(self) -> bool:
         """请求中断正在执行的 Claude 轮次。"""
@@ -155,6 +188,7 @@ class ClaudeAgent:
             try:
                 context_usage = await self._client.get_context_usage()
                 metrics.context_percentage = float(context_usage.get("percentage", 0.0))
+                metrics.context_tokens = int(context_usage.get("totalTokens", 0))
             except Exception:
                 log.debug("无法读取 Claude 上下文占用", exc_info=True)
             self.session_id = latest_session_id
