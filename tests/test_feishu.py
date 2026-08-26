@@ -12,102 +12,85 @@ from feishu_claude_mvp.lark.feishu import FeishuBot
 class Response:
     """模拟飞书 SDK 响应。"""
 
-    def __init__(self, success: bool = True, message_id: str = "message-1", card_id: str = "card-1") -> None:
-        self._success = success
-        self.code = 999
-        self.msg = "failed"
-        self.data = SimpleNamespace(message_id=message_id, card_id=card_id)
+    def __init__(self, message_id: str = "message-1", card_id: str = "card-1", reaction_id: str = "reaction-1") -> None:
+        self.code = 0
+        self.msg = ""
+        self.data = SimpleNamespace(message_id=message_id, card_id=card_id, reaction_id=reaction_id)
 
     def success(self) -> bool:
-        """返回模拟调用是否成功。"""
-        return self._success
+        """返回成功响应。"""
+        return True
 
 
-class CardApi:
-    """采集 CardKit 创建、元素更新和配置更新请求。"""
+class Api:
+    """记录 CardKit、消息回复和表情请求。"""
 
     def __init__(self) -> None:
-        self.creates = []
-        self.contents = []
-        self.settings = []
-        self.updates = []
-        self.create_response = Response()
-        self.content_response = Response()
-        self.settings_response = Response()
-        self.update_response = Response()
+        self.creates, self.replies, self.contents, self.settings, self.reactions, self.deleted = [], [], [], [], [], []
 
-    def create(self, request):
-        """记录卡片实体创建请求。"""
+    def create_card(self, request):
         self.creates.append(request)
-        return self.create_response
+        return Response()
+
+    def reply(self, request):
+        self.replies.append(request)
+        return Response()
 
     def content(self, request):
-        """记录卡片元素内容更新请求。"""
         self.contents.append(request)
-        return self.content_response
+        return Response()
 
     def settings_update(self, request):
-        """记录卡片配置更新请求。"""
         self.settings.append(request)
-        return self.settings_response
+        return Response()
 
-    def update(self, request):
-        """记录整卡更新请求。"""
-        self.updates.append(request)
-        return self.update_response
+    def reaction_create(self, request):
+        self.reactions.append(request)
+        return Response()
 
-
-class MessageApi:
-    """采集发送卡片引用消息请求。"""
-
-    def __init__(self) -> None:
-        self.creates = []
-        self.patches = []
-        self.response = Response()
-
-    def create(self, request):
-        """记录消息创建请求。"""
-        self.creates.append(request)
-        return self.response
-
-    def patch(self, request):
-        """记录旧版消息 Patch 请求。"""
-        self.patches.append(request)
-        return self.response
+    def reaction_delete(self, request):
+        self.deleted.append(request)
+        return Response()
 
 
-def make_bot(card_api: CardApi, message_api: MessageApi) -> FeishuBot:
-    """创建注入 CardKit 和 IM fake client 的机器人。"""
+
+def make_bot(api: Api) -> FeishuBot:
+    """创建注入 fake SDK 客户端的机器人。"""
     bot = FeishuBot("app", "secret", lambda _message: None, lambda _value, _chat, _user: False)
     bot.client = SimpleNamespace(
-        im=SimpleNamespace(v1=SimpleNamespace(message=message_api)),
-        cardkit=SimpleNamespace(v1=SimpleNamespace(card=SimpleNamespace(create=card_api.create, update=card_api.update, settings=card_api.settings_update), card_element=SimpleNamespace(content=card_api.content))),
+        im=SimpleNamespace(v1=SimpleNamespace(message=SimpleNamespace(reply=api.reply), message_reaction=SimpleNamespace(create=api.reaction_create, delete=api.reaction_delete))),
+        cardkit=SimpleNamespace(v1=SimpleNamespace(card=SimpleNamespace(create=api.create_card, settings=api.settings_update), card_element=SimpleNamespace(content=api.content))),
     )
     return bot
 
 
 @pytest.mark.asyncio
-async def test_cardkit_streaming_reply_uses_entity_and_sequenced_element_updates() -> None:
-    """流式回复创建卡片实体，并使用递增序号更新元素。"""
-    card_api, message_api = CardApi(), MessageApi()
-    bot = make_bot(card_api, message_api)
-    handle = await bot.create_streaming_reply("chat-1", ReplySnapshot("", "思考中", "准备请求…"))
+async def test_cardkit_streaming_reply_uses_entity_reply_and_sequenced_updates() -> None:
+    """流式回复创建实体、回复引用并递增更新序号。"""
+    api = Api()
+    bot = make_bot(api)
+    handle = await bot.create_streaming_reply("incoming-1", ReplySnapshot("", "思考中", "准备请求…"))
     await bot.update_streaming_reply(handle, ReplySnapshot("逐步输出", "正在回答", "生成正文"))
     await bot.update_streaming_reply(handle, ReplySnapshot("最终输出", "已完成", metrics=None, final=True))
 
-    assert handle.message_id == "message-1"
-    assert handle.card_id == ""
-    assert len(message_api.creates) == 1
-    assert len(message_api.patches) == 2
-    assert "schema" not in json.loads(message_api.patches[0].request_body.content)
-    assert json.loads(message_api.patches[1].request_body.content)["config"]["wide_screen_mode"] is True
+    card = json.loads(api.creates[0].request_body.data)
+    assert card["schema"] == "2.0"
+    assert card["config"]["streaming_mode"] is True
+    assert card["body"]["elements"][0]["element_id"] == "stream_md"
+    assert api.replies[0].message_id == "incoming-1"
+    assert json.loads(api.replies[0].request_body.content)["data"]["card_id"] == "card-1"
+    assert [request.request_body.sequence for request in api.contents] == [1, 2]
+    assert len(api.settings) == 1
+    assert json.loads(api.settings[0].request_body.settings)["config"]["streaming_mode"] is False
+    assert not api.reactions
+    assert not api.deleted
+    assert handle.card_id == "card-1"
 
 
 @pytest.mark.asyncio
-async def test_cardkit_streaming_reply_requires_cardkit_api() -> None:
-    """没有 CardKit API 时直接报告配置错误。"""
-    bot = FeishuBot("app", "secret", lambda _message: None, lambda _value, _chat, _user: False)
-    bot.client = SimpleNamespace(im=SimpleNamespace(v1=SimpleNamespace(message=MessageApi())))
-
-    handle = await bot.create_streaming_reply("chat-1", ReplySnapshot("", "思考中"))
-    assert handle.message_id == "message-1"
+async def test_cardkit_streaming_reply_does_not_use_message_patch() -> None:
+    """CardKit 流式路径只依赖 reply、element content 和 settings。"""
+    api = Api()
+    bot = make_bot(api)
+    await bot.create_streaming_reply("incoming-1", ReplySnapshot("", "思考中"))
+    assert not hasattr(bot.client.im.v1.message, "patch")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -13,7 +14,7 @@ from typing import Any
 import lark_oapi as lark
 from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTriggerResponse
 
-from .cards import permission_card, permission_result_card, reply_card, stream_metrics, streaming_card
+from .cards import cardkit_streaming_card, permission_card, permission_result_card, reply_card, stream_metrics, streaming_card
 from ..app.service import IncomingMessage, ReplySnapshot
 
 log = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ HandleMessage = Callable[[IncomingMessage], Awaitable[None]]
 def compact_content(snapshot: ReplySnapshot) -> str:
     """返回 CardKit 普通文本元素需要的完整内容，并在终态附加指标。"""
     card = streaming_card(snapshot)
-    content = card["body"]["elements"][0]["content"]
+    content = card["elements"][0]["content"]
     if snapshot.final:
         content = f"{content}\n\n---\n\n<font color='grey'>{stream_metrics(snapshot.metrics, snapshot.session_id)}</font>"
     return content
@@ -51,12 +52,51 @@ class FeishuBot:
         self.on_message, self.on_card_action = on_message, on_card_action
         self.client = lark.Client.builder().app_id(app_id).app_secret(app_secret).build()
         self.loop: asyncio.AbstractEventLoop | None = None
+        self.ws_client: Any = None
+        self.ws_thread: threading.Thread | None = None
+        self.stop_requested = threading.Event()
+        self._stop_lock = threading.Lock()
 
     def start(self, loop: asyncio.AbstractEventLoop) -> None:
         """启动飞书 WebSocket 长连接。"""
+        self.ws_thread = threading.current_thread()
         self.loop = loop
-        dispatcher = lark.EventDispatcherHandler.builder("", "").register_p2_im_message_receive_v1(self._on_message).register_p2_card_action_trigger(self._on_card_action).build()
-        lark.ws.Client(self.app_id, self.app_secret, event_handler=dispatcher).start()
+        dispatcher = lark.EventDispatcherHandler.builder("", "").register_p2_im_message_receive_v1(self._on_message).register_p2_card_action_trigger(self._on_card_action).register_p2_im_message_reaction_created_v1(self._ignore_reaction_event).register_p2_im_message_reaction_deleted_v1(self._ignore_reaction_event).build()
+        log.info("正在启动飞书 WebSocket：app_id=%s", self.app_id)
+        self.ws_client = lark.ws.Client(self.app_id, self.app_secret, event_handler=dispatcher, auto_reconnect=False)
+        if self.stop_requested.is_set():
+            self.ws_client = None
+            return
+        try:
+            self.ws_client.start()
+        except (KeyboardInterrupt, SystemExit):
+            self.stop_requested.set()
+            log.info("收到退出信号，正在关闭飞书 WebSocket")
+            raise
+        finally:
+            log.info("飞书 WebSocket 已停止")
+            self.ws_client = None
+
+    def stop(self) -> None:
+        """请求停止 WebSocket，并等待启动线程结束。"""
+        with self._stop_lock:
+            if self.stop_requested.is_set():
+                return
+            self.stop_requested.set()
+            ws_client = self.ws_client
+            ws_thread = self.ws_thread
+        if ws_client is not None:
+            sdk_loop = getattr(lark.ws.client, "loop", None)
+            connection = getattr(ws_client, "_conn", None)
+            if sdk_loop is not None and connection is not None and not sdk_loop.is_closed():
+                asyncio.run_coroutine_threadsafe(connection.close(), sdk_loop)
+                sdk_loop.call_soon_threadsafe(sdk_loop.stop)
+        if ws_thread is not None and ws_thread is not threading.current_thread():
+            ws_thread.join(timeout=2)
+
+    def _ignore_reaction_event(self, event: Any) -> None:
+        """忽略表情事件，避免 SDK 因未注册处理器报错。"""
+        return
 
     def _on_message(self, event: Any) -> None:
         """将飞书文本事件切换到主 asyncio 循环。"""
@@ -65,6 +105,7 @@ class FeishuBot:
         if message.message_type != "text" or not sender:
             return
         text = json.loads(message.content).get("text", "").strip()
+        log.info("收到飞书输入：message_id=%s，chat_id=%s，user=%s，内容=%s", message.message_id, message.chat_id, sender, text)
         if text and self.loop:
             self.loop.call_soon_threadsafe(asyncio.create_task, self.on_message(IncomingMessage(message.chat_id, sender, text, message.message_id)))
 
@@ -127,9 +168,11 @@ class FeishuBot:
         """发送普通文本消息。"""
         body = lark.im.v1.CreateMessageRequestBody.builder().receive_id(chat_id).msg_type("text").content(json.dumps({"text": text})).build()
         request = lark.im.v1.CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
+        log.info("发送飞书文本：chat_id=%s，内容=%s", chat_id, text)
         response = await asyncio.to_thread(self.client.im.v1.message.create, request)
         if not response.success():
             raise RuntimeError(f"feishu send failed: {response.code} {response.msg}")
+        log.info("飞书文本发送完成：message_id=%s", response.data.message_id)
 
     async def send_card(self, chat_id: str, card: dict[str, Any]) -> str:
         """发送普通静态 interactive 卡片，用于权限授权。"""
@@ -148,27 +191,40 @@ class FeishuBot:
         if not response.success():
             log.warning("授权结果卡片更新失败：消息=%s，错误码=%s，错误信息=%s", message_id, response.code, response.msg)
 
-    async def create_streaming_reply(self, chat_id: str, snapshot: ReplySnapshot, user_open_id: str = "") -> StreamingReplyHandle:
-        """直接发送 interactive 流式卡片，便于对比旧模式首屏延迟。"""
-        log.info("开始创建 interactive 流式卡片：状态=%s，正文长度=%d", snapshot.state, len(snapshot.text))
-        body = lark.im.v1.CreateMessageRequestBody.builder().receive_id(chat_id).msg_type("interactive").content(json.dumps(streaming_card(snapshot, chat_id, user_open_id), ensure_ascii=False)).build()
-        request = lark.im.v1.CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
-        response = await asyncio.to_thread(self.client.im.v1.message.create, request)
-        if not response.success():
-            raise RuntimeError(f"feishu stream create failed: {response.code} {response.msg}")
-        log.info("interactive 流式卡片发送完成")
-        return StreamingReplyHandle(response.data.message_id, request_uuid=str(uuid.uuid4()), chat_id=chat_id, user_open_id=user_open_id)
+    async def create_streaming_reply(self, message_id: str, snapshot: ReplySnapshot, user_open_id: str = "") -> StreamingReplyHandle:
+        """创建 CardKit 流式卡片实体，并将其回复到原消息。"""
+        card_body = lark.cardkit.v1.CreateCardRequestBody.builder().type("card_json").data(json.dumps(cardkit_streaming_card(snapshot), ensure_ascii=False)).build()
+        card_request = lark.cardkit.v1.CreateCardRequest.builder().request_body(card_body).build()
+        card_response = await asyncio.to_thread(self.client.cardkit.v1.card.create, card_request)
+        if not card_response.success() or not card_response.data.card_id:
+            raise RuntimeError(f"feishu card create failed: {card_response.code} {card_response.msg}")
+        card_id = card_response.data.card_id
+        reply_body = lark.im.v1.ReplyMessageRequestBody.builder().msg_type("interactive").content(json.dumps({"type": "card", "data": {"card_id": card_id}}, ensure_ascii=False)).build()
+        reply_request = lark.im.v1.ReplyMessageRequest.builder().message_id(message_id).request_body(reply_body).build()
+        reply_response = await asyncio.to_thread(self.client.im.v1.message.reply, reply_request)
+        if not reply_response.success():
+            raise RuntimeError(f"feishu card reply failed: {reply_response.code} {reply_response.msg}")
+        return StreamingReplyHandle(reply_response.data.message_id, card_id, request_uuid=str(uuid.uuid4()), chat_id=message_id, user_open_id=user_open_id)
 
     async def update_streaming_reply(self, handle: StreamingReplyHandle, snapshot: ReplySnapshot) -> None:
-        """使用旧版 interactive 消息 Patch 更新流式卡片。"""
-        if not handle.message_id:
-            raise RuntimeError("interactive update unavailable: streaming reply has no message_id")
-        body = lark.im.v1.PatchMessageRequestBody.builder().content(json.dumps(streaming_card(snapshot, handle.chat_id, handle.user_open_id), ensure_ascii=False)).build()
-        request = lark.im.v1.PatchMessageRequest.builder().message_id(handle.message_id).request_body(body).build()
-        response = await asyncio.to_thread(self.client.im.v1.message.patch, request)
+        """只更新 CardKit markdown element，并在终态关闭流式。"""
+        if not handle.card_id:
+            raise RuntimeError("cardkit update unavailable: streaming reply has no card_id")
+        handle.sequence += 1
+        body = lark.cardkit.v1.ContentCardElementRequestBody.builder().content(compact_content(snapshot) or "·").sequence(handle.sequence).build()
+        request = lark.cardkit.v1.ContentCardElementRequest.builder().card_id(handle.card_id).element_id(handle.element_id).request_body(body).build()
+        log.info("更新飞书 CardKit：card_id=%s，sequence=%s，状态=%s，内容=%s", handle.card_id, handle.sequence, snapshot.state, compact_content(snapshot))
+        response = await asyncio.to_thread(self.client.cardkit.v1.card_element.content, request)
         if not response.success():
-            log.error("飞书 interactive 卡片更新失败：消息=%s，状态=%s，错误码=%s，错误信息=%s", handle.message_id, snapshot.state, response.code, response.msg)
-            raise RuntimeError(f"feishu stream patch failed: {response.code} {response.msg}")
+            raise RuntimeError(f"feishu card element update failed: {response.code} {response.msg}")
+        if snapshot.final:
+            await asyncio.sleep(min(3, len(snapshot.text) * 0.025))
+            handle.sequence += 1
+            settings_body = lark.cardkit.v1.SettingsCardRequestBody.builder().settings(json.dumps({"config": {"streaming_mode": False}})).sequence(handle.sequence).build()
+            settings_request = lark.cardkit.v1.SettingsCardRequest.builder().card_id(handle.card_id).request_body(settings_body).build()
+            settings_response = await asyncio.to_thread(self.client.cardkit.v1.card.settings, settings_request)
+            if not settings_response.success():
+                log.warning("关闭 CardKit 流式失败：卡片=%s，错误=%s", handle.card_id, settings_response.msg)
 
     def build_permission_card(self, approval_id: str, token: str, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
         """构建工具授权卡。"""

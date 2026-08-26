@@ -153,6 +153,7 @@ class ClaudeAgent:
                 self._connected = True
                 log.info("Claude 会话已连接：是否恢复旧会话=%s", "是" if self.session_id else "否")
             log.info("Claude 请求开始：是否复用客户端=%s", "是" if reused_client else "否")
+            log.info("Claude 输入：%s", prompt)
             await self._client.query(prompt)
             if status:
                 status("思考中", None)
@@ -161,13 +162,14 @@ class ClaudeAgent:
                     text = _text_delta(message)
                     if text:
                         partial_text += text
+                        log.info("Claude 输出增量：%s", text)
                         output(text)
                         if status:
                             status("正在回答", None)
                     tool_name = _tool_name(message)
                     if tool_name:
                         metrics.tool_calls += 1
-                        log.info("Claude 请求执行工具：%s", tool_name)
+                        log.info("技能调用：%s", tool_name)
                         if status:
                             status("执行工具", f"正在执行：{tool_name}")
                 elif isinstance(message, AssistantMessage):
@@ -178,6 +180,7 @@ class ClaudeAgent:
                         tail = full_text
                     if tail:
                         partial_text += tail
+                        log.info("Claude 输出文本：%s", tail)
                         output(tail)
                 elif isinstance(message, ResultMessage):
                     latest_session_id = message.session_id or latest_session_id

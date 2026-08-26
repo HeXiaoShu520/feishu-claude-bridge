@@ -242,12 +242,12 @@ class ConversationController:
                 current = snapshot()
                 if current.state != "思考中" or current.text:
                     continue
-                animation_index = (animation_index + 1) % 4
-                current = ReplySnapshot("思考中" + "." * animation_index, current.state, current.detail, current.metrics, current.final, current.steps, current.session_id)
+                animation_index = (animation_index + 1) % 10
+                current = ReplySnapshot("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[animation_index], current.state, current.detail, current.metrics, current.final, current.steps, current.session_id)
             else:
                 current = snapshot()
             if not first_update:
-                await asyncio.sleep(0.07)
+                await asyncio.sleep(0.2)
             first_update = False
             key = f"{current.state}\0{current.detail}\0{current.text}"
             if key != last_sent and not finished.is_set():

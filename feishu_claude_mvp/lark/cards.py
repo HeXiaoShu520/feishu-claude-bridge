@@ -35,12 +35,11 @@ def permission_result_card(tool_name: str, tool_input: dict[str, Any], decision:
 
 
 def streaming_card(snapshot: Any, chat_id: str = "", user_open_id: str = "") -> dict[str, Any]:
-    """渲染普通 interactive 消息每次 Patch 所需的完整流式卡片。"""
+    """渲染旧版 interactive 卡片，供静态兼容场景使用。"""
     elements = []
     if snapshot.text:
         elements.append({"tag": "markdown", "content": compact_markdown(snapshot.text)})
-    title = "Claude"
-    card = {"config": {"wide_screen_mode": True}, "header": {"title": {"tag": "plain_text", "content": title}, "template": STATE_TEMPLATES.get(snapshot.state, "blue")}}
+    card = {"config": {"wide_screen_mode": True}, "header": {"title": {"tag": "plain_text", "content": "Claude"}, "template": STATE_TEMPLATES.get(snapshot.state, "blue")}}
     if not elements:
         elements.append({"tag": "markdown", "content": stream_status(snapshot.state, getattr(snapshot, "detail", None), getattr(snapshot, "steps", ()))})
     if snapshot.permission:
@@ -54,6 +53,12 @@ def streaming_card(snapshot: Any, chat_id: str = "", user_open_id: str = "") -> 
             elements[0]["content"] = f"{elements[0]['content']}\n\n<font color='grey'>{metrics}</font>"
     card["elements"] = elements
     return card
+
+
+def cardkit_streaming_card(snapshot: Any) -> dict[str, Any]:
+    """构造 CardKit schema 2.0 流式卡片实体。"""
+    content = compact_markdown(snapshot.text) if snapshot.text else stream_status(snapshot.state, getattr(snapshot, "detail", None), getattr(snapshot, "steps", ()))
+    return {"schema": "2.0", "config": {"update_multi": True, "streaming_mode": True, "streaming_config": {"print_frequency_ms": {"default": 50}, "print_step": {"default": 2}, "print_strategy": "fast"}}, "body": {"elements": [{"tag": "markdown", "content": content or "·", "element_id": "stream_md"}]}}
 
 
 def stream_status(state: str, detail: str | None, steps: tuple[str, ...] = ()) -> str:

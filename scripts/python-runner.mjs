@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,12 +8,37 @@ const venvPython = process.platform === "win32"
   ? join(root, ".venv", "Scripts", "python.exe")
   : join(root, ".venv", "bin", "python");
 const [command, ...extraArgs] = process.argv.slice(2);
+let childProcess = null;
+let shuttingDown = false;
+
+function killProcessTree(pid) {
+  if (process.platform !== "win32" || !pid) return;
+  try {
+    execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+  } catch {
+    // 进程已退出时 taskkill 会返回失败，无需再次抛出。
+  }
+}
+
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (childProcess?.pid) killProcessTree(childProcess.pid);
+  if (signal) process.exitCode = 0;
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 function run(executable, args) {
   return new Promise((resolveRun, reject) => {
     const child = spawn(executable, args, { cwd: root, stdio: "inherit", shell: false });
+    childProcess = child;
     child.on("error", reject);
-    child.on("exit", (code, signal) => resolveRun(code ?? (signal ? 1 : 0)));
+    child.on("exit", (code, signal) => {
+      childProcess = null;
+      resolveRun(code ?? (signal ? 1 : 0));
+    });
   });
 }
 
