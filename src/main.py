@@ -24,6 +24,7 @@ class _ColorFormatter(logging.Formatter):
     """为日志时间、级别、输入输出和技能调用添加终端颜色。"""
 
     RESET = "\033[0m"
+    GREY = "\033[90m"
     COLORS = {"DEBUG": "\033[90m", "INFO": "\033[36m", "WARNING": "\033[33m", "ERROR": "\033[31m", "CRITICAL": "\033[1;31m"}
 
     def format(self, record: logging.LogRecord) -> str:
@@ -42,7 +43,8 @@ class _ColorFormatter(logging.Formatter):
             color = "\033[1;33m"
         if raw_message and raw_message in formatted:
             prefix, suffix = formatted.split(raw_message, 1)
-            return f"{prefix}{color}{raw_message}{self.RESET}{suffix}"
+            # 时间戳部分显示为灰色
+            return f"{self.GREY}{prefix}{self.RESET}{color}{raw_message}{self.RESET}{suffix}"
         return formatted
 
 
