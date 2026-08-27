@@ -9,7 +9,7 @@
 - Claude 会话按 `chat_id + user_open_id` 隔离并保存；
 - `/help`、`/new`、`/stop`、`/resume [session_id]`、`/mode default|acceptEdits|plan|dontAsk`；
 - Claude 工具请求以飞书卡片显示：允许一次 / 本会话允许 / 拒绝；
-- 使用旧版 interactive 卡片，通过 `message.patch` 更新展示 Claude 输出；明确不使用飞书 CardKit JSON 2.0（V2）；
+- 使用 CardKit JSON 2.0 流式卡片，通过 `cardkit.v1.card_element.content` 原生更新展示 Claude 输出；
 - 流式卡片使用颜色区分状态，终态正文末尾显示模型、上下文占用百分比、耗时和会话短 ID；上下文百分比来自 Claude Agent SDK 的 `get_context_usage()`；
 - Claude 工具授权使用独立卡片显示，授权完成后继续更新原流式回复卡片；
 - 同一 `chat_id + user_open_id` 复用 Claude client/子进程；服务重启或连接异常后通过保存的 session ID 恢复；
@@ -57,8 +57,6 @@ card.action.trigger
 - 创建和发送 IM 消息；
 - 删除已完成的工具授权消息；
 - 创建、更新和发送 CardKit 卡片实体。
-
-流式回复明确不使用 CardKit 原生卡片实体、JSON 2.0（V2）或递增 `sequence` 更新；生产逻辑使用旧版 interactive `message.patch`，按钮也不使用 V2 专用结构。
 
 终态指标示例：
 
