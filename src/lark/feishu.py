@@ -239,8 +239,8 @@ class FeishuBot:
         content = compact_content(snapshot) or "·"
         body = lark.cardkit.v1.ContentCardElementRequestBody.builder().content(content).sequence(handle.sequence).build()
         request = lark.cardkit.v1.ContentCardElementRequest.builder().card_id(handle.card_id).element_id(handle.element_id).request_body(body).build()
-        # 只在有实际文本内容或终态时记录日志，避免流式 spinner 刷屏
-        if snapshot.text or snapshot.final:
+        # 只在终态或有实际回复内容时记录日志，避免思考状态和 spinner 刷屏
+        if snapshot.final or (snapshot.state == "正在回答" and snapshot.text):
             log.info("更新飞书 CardKit：card_id=%s，sequence=%s，状态=%s，内容=%s", handle.card_id, handle.sequence, snapshot.state, log_preview(content))
         response = await asyncio.to_thread(self.client.cardkit.v1.card_element.content, request)
         if not response.success():
