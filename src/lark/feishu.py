@@ -129,7 +129,9 @@ class FeishuBot:
         sender = event.event.sender.sender_id.open_id
         if message.message_type != "text" or not sender:
             return
-        text = json.loads(message.content).get("text", "").strip()
+        content_json = json.loads(message.content)
+        log.debug("收到飞书原始消息 content：%s", content_json)
+        text = content_json.get("text", "").strip()
         log.info("收到飞书输入：message_id=%s，chat_id=%s，user=%s，内容=%s", message.message_id, message.chat_id, sender, text)
         if text and self.loop:
             self.loop.call_soon_threadsafe(asyncio.create_task, self.on_message(IncomingMessage(message.chat_id, sender, text, message.message_id)))
