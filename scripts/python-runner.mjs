@@ -92,7 +92,7 @@ try {
       break;
     case "start":
       requireVenv();
-      process.exitCode = await run(venvPython, ["-m", "feishu_claude_mvp.main", ...extraArgs]);
+      process.exitCode = await run(venvPython, ["-m", "src.main", ...extraArgs]);
       break;
     case "test":
       requireVenv();
