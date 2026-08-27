@@ -1,8 +1,8 @@
 import asyncio
 from pathlib import Path
 
-from feishu_claude_mvp.cli import TerminalApp
-from feishu_claude_mvp.app.store import Conversation, ConversationStore
+from src.cli import TerminalApp
+from src.app.store import Conversation, ConversationStore
 
 
 def test_new_clears_session_and_mode_persists(tmp_path: Path) -> None:

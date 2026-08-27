@@ -16,8 +16,8 @@ dev = [
 ]
 
 [project.scripts]
-feishu-claude-bridge = "feishu_claude_bridge.main:main"
+feishu-claude-bridge = "src.main:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src"]

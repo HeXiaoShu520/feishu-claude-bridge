@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from feishu_claude_mvp.app.service import BotService, IncomingMessage, ReplySnapshot
-from feishu_claude_mvp.app.store import ConversationStore
+from src.app.service import BotService, IncomingMessage, ReplySnapshot
+from src.app.store import ConversationStore
 
 
 @dataclass

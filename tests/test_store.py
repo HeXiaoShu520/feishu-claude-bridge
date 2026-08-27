@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from feishu_claude_mvp.app.store import Conversation, ConversationStore
+from src.app.store import Conversation, ConversationStore
 
 
 def test_store_round_trip(tmp_path: Path) -> None:

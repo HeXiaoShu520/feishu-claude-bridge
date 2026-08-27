@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass
 
-from feishu_claude_mvp.app.service import ReplySnapshot
-from feishu_claude_mvp.lark.cards import permission_card, reply_card, streaming_card
+from src.app.service import ReplySnapshot
+from src.lark.cards import permission_card, reply_card, streaming_card
 
 
 @dataclass

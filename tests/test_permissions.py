@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from feishu_claude_mvp.app.permissions import PermissionBroker
+from src.app.permissions import PermissionBroker
 
 
 @pytest.mark.asyncio

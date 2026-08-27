@@ -1,4 +1,4 @@
-from feishu_claude_mvp.app.commands import HelpCommand, InvalidCommand, ModeCommand, NewCommand, ResumeCommand, StopCommand, TextPrompt, parse_command
+from src.app.commands import HelpCommand, InvalidCommand, ModeCommand, NewCommand, ResumeCommand, StopCommand, TextPrompt, parse_command
 
 
 def test_parse_supported_commands() -> None:

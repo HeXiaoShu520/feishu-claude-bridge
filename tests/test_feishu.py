@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from feishu_claude_mvp.app.service import ReplySnapshot
-from feishu_claude_mvp.lark.feishu import FeishuBot, compact_content
+from src.app.service import ReplySnapshot
+from src.lark.feishu import FeishuBot, compact_content
 
 
 class Response:
