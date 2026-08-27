@@ -1,6 +1,6 @@
-# Feishu Claude
+# Feishu Claude Bridge
 
-使用官方 Claude Agent SDK 和飞书官方 Python SDK 的单平台机器人：在飞书中控制本机 Claude Code。
+飞书与 Claude Code SDK 之间的桥接服务，支持流式卡片实时更新。
 
 ## 支持
 

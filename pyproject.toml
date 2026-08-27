@@ -1,7 +1,7 @@
 [project]
-name = "feishu-claude-mvp"
+name = "feishu-claude-bridge"
 version = "0.1.0"
-description = "Feishu-native Claude Code assistant"
+description = "Bridge between Feishu and Claude Code SDK with streaming cards"
 requires-python = ">=3.11"
 dependencies = [
     "claude-agent-sdk>=0.2.137",
@@ -16,7 +16,7 @@ dev = [
 ]
 
 [project.scripts]
-feishu-claude-mvp = "feishu_claude_mvp.main:main"
+feishu-claude-bridge = "feishu_claude_bridge.main:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
