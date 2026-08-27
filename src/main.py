@@ -84,7 +84,8 @@ async def run() -> None:
     for handler in logging.getLogger().handlers:
         handler.setFormatter(formatter)
     _configure_safe_logging()
-    cwd = Path(require("FEISHU_CLAUDE_CWD")).resolve()
+    cwd_env = os.getenv("FEISHU_CLAUDE_CWD")
+    cwd = Path(cwd_env).resolve() if cwd_env else Path(__file__).parent.parent.resolve()
     if not cwd.is_dir():
         raise RuntimeError(f"工作目录不存在：{cwd}")
     store = ConversationStore(Path(os.getenv("FEISHU_CLAUDE_DB_PATH", Path.home() / ".feishu-claude-mvp" / "sessions.db")))
