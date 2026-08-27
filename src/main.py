@@ -88,7 +88,9 @@ async def run() -> None:
     cwd = Path(cwd_env).resolve() if cwd_env else Path(__file__).parent.parent.resolve()
     if not cwd.is_dir():
         raise RuntimeError(f"工作目录不存在：{cwd}")
-    store = ConversationStore(Path(os.getenv("FEISHU_CLAUDE_DB_PATH", Path.home() / ".feishu-claude-mvp" / "sessions.db")))
+    project_root = Path(__file__).parent.parent.resolve()
+    db_path = Path(os.getenv("FEISHU_CLAUDE_DB_PATH", project_root / ".data" / "sessions.db"))
+    store = ConversationStore(db_path)
     bot: FeishuBot
     permissions = PermissionBroker()
 
