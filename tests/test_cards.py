@@ -49,7 +49,7 @@ def test_streaming_card_renders_complete_interactive_frames() -> None:
     assert completed["config"]["wide_screen_mode"] is True
     assert completed["header"]["template"] == "green"
     assert [element["tag"] for element in completed["elements"]] == ["markdown"]
-    assert "claude-test · 上下文 0.1K · 1.2s" in completed["elements"][0]["content"]
+    assert "claude-test · 输入 0.0K / 输出 0.0K" in completed["elements"][0]["content"]
 
 
 def test_markdown_compacts_blank_lines_but_keeps_code() -> None:

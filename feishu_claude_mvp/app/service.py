@@ -153,6 +153,21 @@ class ConversationController:
             await self._agent.close()
             self._agent = None
 
+    async def shutdown(self) -> None:
+        """进程退出时取消在跑的任务并释放 Claude client，不再回写飞书。"""
+        self._generation += 1
+        if self._agent:
+            await self._agent.interrupt()
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if self._agent:
+            await self._agent.close()
+            self._agent = None
+
     def _get_agent(self) -> Agent:
         """返回与当前会话匹配的常驻客户端，否则重建。"""
         cwd = Path(self.conversation.cwd)
@@ -314,3 +329,12 @@ class BotService:
             controller = ConversationController(conversation, self.store, self.send_factory(message), self.reply_stream_factory(message), self.permission_factory(message), self.agent_factory)
             self.controllers[message.conversation_key] = controller
         await controller.handle(message.text)
+
+    async def close(self) -> None:
+        """退出时释放全部会话的 Claude Code 子进程。"""
+        results = await asyncio.gather(*(controller.shutdown() for controller in self.controllers.values()), return_exceptions=True)
+        self.controllers.clear()
+        for result in results:
+            if isinstance(result, Exception):
+                import logging
+                logging.getLogger(__name__).warning("退出时关闭 Claude 会话失败：%s", result)

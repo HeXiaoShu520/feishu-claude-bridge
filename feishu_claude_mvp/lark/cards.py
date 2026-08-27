@@ -46,7 +46,7 @@ def streaming_card(snapshot: Any, chat_id: str = "", user_open_id: str = "") -> 
         auth = permission_card(snapshot.permission["approval_id"], snapshot.permission["token"], snapshot.permission["tool_name"], snapshot.permission["tool_input"])
         elements.extend(auth["elements"])
     if snapshot.final and elements[0]["tag"] == "markdown":
-        metrics = _context_metrics(snapshot.metrics, snapshot.session_id)
+        metrics = _metrics_text(snapshot.metrics, snapshot.session_id)
         if chat_id and user_open_id:
             elements.append({"tag": "column_set", "flex_mode": "none", "background_style": "default", "columns": [{"tag": "column", "width": "weighted", "vertical_align": "center", "elements": [{"tag": "markdown", "content": f"<font color='grey'>{metrics}</font>"}]}, *[{"tag": "column", "width": "auto", "vertical_align": "center", "elements": [{"tag": "button", "text": {"tag": "plain_text", "content": text}, "type": "default", "value": {"action": action, "chat_id": chat_id, "user_open_id": user_open_id}}]} for text, action in (("详情", "details"), ("压缩", "compact"), ("新建", "new"))]]})
         else:

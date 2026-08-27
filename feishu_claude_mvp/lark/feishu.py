@@ -23,11 +23,17 @@ HandleMessage = Callable[[IncomingMessage], Awaitable[None]]
 
 def compact_content(snapshot: ReplySnapshot) -> str:
     """返回 CardKit 普通文本元素需要的完整内容，并在终态附加指标。"""
-    card = streaming_card(snapshot)
-    content = card["elements"][0]["content"]
+    # 直接取流式卡片正文，避免 streaming_card 的终态分支重复拼接一次指标。
+    content = cardkit_streaming_card(snapshot)["body"]["elements"][0]["content"]
     if snapshot.final:
         content = f"{content}\n\n---\n\n<font color='grey'>{stream_metrics(snapshot.metrics, snapshot.session_id)}</font>"
     return content
+
+
+def log_preview(content: str, limit: int = 100) -> str:
+    """日志只保留卡片正文首段，避免整段回答重复刷屏。"""
+    single_line = " ".join(content.split())
+    return single_line if len(single_line) <= limit else f"{single_line[:limit]}…（共 {len(content)} 字）"
 
 
 @dataclass
@@ -73,6 +79,12 @@ class FeishuBot:
             self.stop_requested.set()
             log.info("收到退出信号，正在关闭飞书 WebSocket")
             raise
+        except RuntimeError:
+            # stop() 停掉 SDK 事件循环后，其 run_until_complete 必然抛
+            # "Event loop stopped before Future completed"，属于预期退出路径。
+            if not self.stop_requested.is_set():
+                raise
+            log.info("飞书 WebSocket 事件循环已按请求停止")
         finally:
             log.info("飞书 WebSocket 已停止")
             self.ws_client = None
@@ -88,11 +100,24 @@ class FeishuBot:
         if ws_client is not None:
             sdk_loop = getattr(lark.ws.client, "loop", None)
             connection = getattr(ws_client, "_conn", None)
-            if sdk_loop is not None and connection is not None and not sdk_loop.is_closed():
-                asyncio.run_coroutine_threadsafe(connection.close(), sdk_loop)
-                sdk_loop.call_soon_threadsafe(sdk_loop.stop)
+            if sdk_loop is not None and not sdk_loop.is_closed():
+                if connection is not None:
+                    asyncio.run_coroutine_threadsafe(connection.close(), sdk_loop)
+                # SDK 的 start() 阻塞在永不结束的 _select() 上，只 stop 事件循环
+                # 会让 run_until_complete 抛 RuntimeError 且 ping/recv 任务残留，
+                # 因此显式取消 SDK 循环里的全部任务再停循环。
+                sdk_loop.call_soon_threadsafe(self._cancel_sdk_tasks, sdk_loop)
         if ws_thread is not None and ws_thread is not threading.current_thread():
-            ws_thread.join(timeout=2)
+            ws_thread.join(timeout=5)
+            if ws_thread.is_alive():
+                log.warning("飞书 WebSocket 线程未在超时内退出，进程可能残留")
+
+    @staticmethod
+    def _cancel_sdk_tasks(sdk_loop: asyncio.AbstractEventLoop) -> None:
+        """在 SDK 事件循环内取消其全部任务，然后停止该循环。"""
+        for task in asyncio.all_tasks(sdk_loop):
+            task.cancel()
+        sdk_loop.stop()
 
     def _ignore_reaction_event(self, event: Any) -> None:
         """忽略表情事件，避免 SDK 因未注册处理器报错。"""
@@ -211,9 +236,10 @@ class FeishuBot:
         if not handle.card_id:
             raise RuntimeError("cardkit update unavailable: streaming reply has no card_id")
         handle.sequence += 1
-        body = lark.cardkit.v1.ContentCardElementRequestBody.builder().content(compact_content(snapshot) or "·").sequence(handle.sequence).build()
+        content = compact_content(snapshot) or "·"
+        body = lark.cardkit.v1.ContentCardElementRequestBody.builder().content(content).sequence(handle.sequence).build()
         request = lark.cardkit.v1.ContentCardElementRequest.builder().card_id(handle.card_id).element_id(handle.element_id).request_body(body).build()
-        log.info("更新飞书 CardKit：card_id=%s，sequence=%s，状态=%s，内容=%s", handle.card_id, handle.sequence, snapshot.state, compact_content(snapshot))
+        log.info("更新飞书 CardKit：card_id=%s，sequence=%s，状态=%s，内容=%s", handle.card_id, handle.sequence, snapshot.state, log_preview(content))
         response = await asyncio.to_thread(self.client.cardkit.v1.card_element.content, request)
         if not response.success():
             raise RuntimeError(f"feishu card element update failed: {response.code} {response.msg}")

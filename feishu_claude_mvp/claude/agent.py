@@ -162,7 +162,6 @@ class ClaudeAgent:
                     text = _text_delta(message)
                     if text:
                         partial_text += text
-                        log.info("Claude 输出增量：%s", text)
                         output(text)
                         if status:
                             status("正在回答", None)

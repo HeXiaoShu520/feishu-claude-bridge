@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from feishu_claude_mvp.app.service import ReplySnapshot
-from feishu_claude_mvp.lark.feishu import FeishuBot
+from feishu_claude_mvp.lark.feishu import FeishuBot, compact_content
 
 
 class Response:
@@ -85,6 +85,15 @@ async def test_cardkit_streaming_reply_uses_entity_reply_and_sequenced_updates()
     assert not api.reactions
     assert not api.deleted
     assert handle.card_id == "card-1"
+
+
+def test_compact_content_appends_metrics_once() -> None:
+    """终态 CardKit 正文只能出现一条模型消耗后缀。"""
+    metrics = SimpleNamespace(model="claude-test", input_tokens=12, output_tokens=34, cache_read_tokens=5, cache_creation_tokens=2, elapsed_seconds=1.25)
+    content = compact_content(ReplySnapshot("最终结果", "已完成", metrics=metrics, final=True, session_id="session-1"))
+
+    assert content.count("claude-test") == 1
+    assert content.count("输入 0.0K / 输出 0.0K") == 1
 
 
 @pytest.mark.asyncio

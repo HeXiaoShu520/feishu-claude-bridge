@@ -27,19 +27,23 @@ class _ColorFormatter(logging.Formatter):
     COLORS = {"DEBUG": "\033[90m", "INFO": "\033[36m", "WARNING": "\033[33m", "ERROR": "\033[31m", "CRITICAL": "\033[1;31m"}
 
     def format(self, record: logging.LogRecord) -> str:
-        message = super().format(record)
+        formatted = super().format(record)
         if not sys.stderr.isatty():
-            return message
+            return formatted
+        raw_message = record.getMessage()
         color = self.COLORS.get(record.levelname, self.RESET)
-        if "收到飞书输入" in message:
+        if "收到飞书输入" in raw_message:
             color = "\033[1;34m"
-        elif "Claude 输入" in message:
+        elif "Claude 输入" in raw_message:
             color = "\033[1;35m"
-        elif "Claude 输出" in message or "更新飞书 CardKit" in message:
+        elif "Claude 输出" in raw_message or "更新飞书 CardKit" in raw_message:
             color = "\033[1;32m"
-        elif "技能" in message or "tool" in message.lower():
+        elif "技能" in raw_message or "tool" in raw_message.lower():
             color = "\033[1;33m"
-        return f"{color}{message}{self.RESET}"
+        if raw_message and raw_message in formatted:
+            prefix, suffix = formatted.split(raw_message, 1)
+            return f"{prefix}{color}{raw_message}{self.RESET}{suffix}"
+        return formatted
 
 
 class _SafeSdkLogFilter(logging.Filter):
@@ -142,6 +146,13 @@ async def run() -> None:
         await asyncio.to_thread(bot.start, loop)
     finally:
         request_shutdown()
+        # 关闭全部 Claude Code 子进程，否则 WebSocket 停了进程仍残留。
+        await service.close()
+        pending = [task for task in asyncio.all_tasks(loop) if task is not asyncio.current_task()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
 
 def main() -> None:
