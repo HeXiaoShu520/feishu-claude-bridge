@@ -239,7 +239,9 @@ class FeishuBot:
         content = compact_content(snapshot) or "·"
         body = lark.cardkit.v1.ContentCardElementRequestBody.builder().content(content).sequence(handle.sequence).build()
         request = lark.cardkit.v1.ContentCardElementRequest.builder().card_id(handle.card_id).element_id(handle.element_id).request_body(body).build()
-        log.info("更新飞书 CardKit：card_id=%s，sequence=%s，状态=%s，内容=%s", handle.card_id, handle.sequence, snapshot.state, log_preview(content))
+        # 只在有实际文本内容或终态时记录日志，避免流式 spinner 刷屏
+        if snapshot.text or snapshot.final:
+            log.info("更新飞书 CardKit：card_id=%s，sequence=%s，状态=%s，内容=%s", handle.card_id, handle.sequence, snapshot.state, log_preview(content))
         response = await asyncio.to_thread(self.client.cardkit.v1.card_element.content, request)
         if not response.success():
             raise RuntimeError(f"feishu card element update failed: {response.code} {response.msg}")
