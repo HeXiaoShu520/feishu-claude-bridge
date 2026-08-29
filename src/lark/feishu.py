@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import threading
 import uuid
+from pathlib import Path
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -124,20 +126,42 @@ class FeishuBot:
         return
 
     def _on_message(self, event: Any) -> None:
-        """将飞书文本事件切换到主 asyncio 循环。"""
+        """将飞书文本或图片事件切换到主 asyncio 循环。"""
         message = event.event.message
         sender = event.event.sender.sender_id.open_id
-        if message.message_type != "text" or not sender:
+        if not sender or message.message_type not in {"text", "image"}:
             return
         content_json = json.loads(message.content)
+        image_content = None
+        if message.message_type == "image":
+            image_key = content_json.get("image_key")
+            if not image_key:
+                log.warning("飞书图片消息缺少 image_key：message_id=%s", message.message_id)
+                return
+            image_content = self._download_image(message.message_id, image_key)
+            if not image_content:
+                return
         text = content_json.get("text", "").strip()
         # 飞书引用回复格式：{"text": "@_user_1 被引用内容\n实际内容"}
         # 提取换行符后的实际内容，如果没有换行符则使用全部内容
         if "\n" in text and text.startswith("@_user_"):
             text = text.split("\n", 1)[1].strip()
-        log.info("收到飞书输入：message_id=%s，chat_id=%s，user=%s，内容=%s", message.message_id, message.chat_id, sender, text)
-        if text and self.loop:
-            self.loop.call_soon_threadsafe(asyncio.create_task, self.on_message(IncomingMessage(message.chat_id, sender, text, message.message_id)))
+        # log.info("收到飞书输入：message_id=%s，chat_id=%s，user=%s，内容=%s", message.message_id, message.chat_id, sender, text)
+        if (text or image_content) and self.loop:
+            self.loop.call_soon_threadsafe(asyncio.create_task, self.on_message(IncomingMessage(message.chat_id, sender, text, message.message_id, image_content)))
+
+    def _download_image(self, message_id: str, image_key: str) -> dict[str, Any] | None:
+        """下载飞书图片并编码为 Claude 原生图片内容。"""
+        request = lark.im.v1.GetMessageResourceRequest.builder().message_id(message_id).file_key(image_key).type("image").build()
+        response = self.client.im.v1.message_resource.get(request)
+        if response.code != 0 or not response.file:
+            log.error("飞书图片下载失败：message_id=%s，code=%s，msg=%s", message_id, response.code, getattr(response, "msg", ""))
+            return None
+        image_bytes = response.file.read()
+        suffix = Path(response.file_name or "image.jpg").suffix.lower()
+        media_type = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}.get(suffix, "image/jpeg")
+        log.info("飞书图片已下载：message_id=%s，大小=%s字节", message_id, len(image_bytes))
+        return {"source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(image_bytes).decode("ascii")}}
 
     def _on_card_action(self, event: Any) -> Any:
         """解析权限和会话操作卡片，并切换到主 asyncio 循环。"""

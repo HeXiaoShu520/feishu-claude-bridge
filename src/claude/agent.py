@@ -58,7 +58,7 @@ class ClaudeAgent:
         """判断现有客户端能否安全复用于指定会话配置。"""
         return self.cwd == cwd and self.mode == mode and self.session_id == session_id
 
-    async def run(self, prompt: str, output: Output, ask_permission: PermissionPrompt, status: Status | None = None) -> AgentResult:
+    async def run(self, prompt: Any, output: Output, ask_permission: PermissionPrompt, status: Status | None = None) -> AgentResult:
         """执行一轮请求，并保留成功连接供同会话下一轮复用。"""
         if self._active_task and not self._active_task.done():
             raise RuntimeError("Claude is already processing a request")
@@ -154,7 +154,12 @@ class ClaudeAgent:
                 log.info("Claude 会话已连接：是否恢复旧会话=%s", "是" if self.session_id else "否")
             log.info("Claude 请求开始：是否复用客户端=%s", "是" if reused_client else "否")
             log.info("Claude 输入：%s", prompt)
-            await self._client.query(prompt)
+            if isinstance(prompt, str):
+                await self._client.query(prompt)
+            else:
+                async def message_stream():
+                    yield {"type": "user", "message": {"role": "user", "content": prompt}}
+                await self._client.query(message_stream())
             if status:
                 status("思考中", None)
             async for message in self._client.receive_response():

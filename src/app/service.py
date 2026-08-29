@@ -23,7 +23,7 @@ class Agent(Protocol):
     """服务层使用的 Claude 客户端边界。"""
 
     def matches(self, cwd: Path, mode: str, session_id: str | None) -> bool: ...
-    async def run(self, prompt: str, output, ask_permission, status=None) -> AgentResult: ...
+    async def run(self, prompt: Any, output, ask_permission, status=None) -> AgentResult: ...
     async def compact(self) -> bool: ...
     async def interrupt(self) -> bool: ...
     async def close(self) -> None: ...
@@ -59,12 +59,13 @@ ReplyStreamFactory = Callable[["IncomingMessage"], ReplyStream]
 
 @dataclass(frozen=True)
 class IncomingMessage:
-    """归一化后的飞书文本消息。"""
+    """归一化后的飞书消息。"""
 
     chat_id: str
     user_open_id: str
     text: str
     message_id: str
+    image_content: dict[str, Any] | None = None
 
     @property
     def conversation_key(self) -> str:
@@ -134,7 +135,7 @@ class ConversationController:
             elif isinstance(command, InvalidCommand):
                 await self.send_text(command.message)
 
-    async def _replace_task(self, prompt: str) -> None:
+    async def _replace_task(self, prompt: Any) -> None:
         """中断旧任务后启动新任务，保证新消息优先。"""
         await self._stop(keep_agent=True)
         self._generation += 1
@@ -176,11 +177,11 @@ class ConversationController:
         self._agent = self.agent_factory(cwd, self.conversation.mode, self.conversation.session_id)
         return self._agent
 
-    async def _run(self, prompt: str, generation: int) -> None:
+    async def _run(self, prompt: Any, generation: int) -> None:
         """运行一轮 Claude 请求并将文本和状态渐进渲染到飞书。"""
         import logging
         log = logging.getLogger(__name__)
-        log.info("Claude 输入前100字符：%s", prompt[:100])
+        log.info("Claude 输入前100字符：%s", prompt[:100] if isinstance(prompt, str) else prompt[0].get("text", "")[:100])
         agent = self._get_agent()
         parts: list[str] = []
         changed = asyncio.Event()
@@ -219,7 +220,7 @@ class ConversationController:
         final_state = "已完成"
         try:
             result = await agent.run(prompt, output, permission, status)
-            log.info("Claude 输出前100字符：%s", "".join(parts)[:100])
+            log.info("Claude 输出：%s", " ".join("".join(parts).split())[:100])
             metrics = result.metrics
             session_id = result.session_id
             if generation != self._generation:
@@ -328,7 +329,10 @@ class BotService:
             conversation = self.store.get(message.conversation_key) or Conversation(message.conversation_key, None, "default", self.cwd, message.chat_id, message.user_open_id)
             controller = ConversationController(conversation, self.store, self.send_factory(message), self.reply_stream_factory(message), self.permission_factory(message), self.agent_factory)
             self.controllers[message.conversation_key] = controller
-        await controller.handle(message.text)
+        prompt: Any = message.text
+        if message.image_content:
+            prompt = [{"type": "text", "text": message.text or "请分析这张图片"}, {"type": "image", **message.image_content}]
+        await controller.handle(prompt)
 
     async def close(self) -> None:
         """退出时释放全部会话的 Claude Code 子进程。"""
